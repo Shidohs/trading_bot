@@ -11,7 +11,16 @@ from core.risk import RiskManager
 from core.orders import TradeEngine
 from core.indicators import OHLCBuffers
 from core.features import FeatureEngine
-from config import APP_ID, TOKEN
+
+# API - TOKEN
+from dotenv import load_dotenv
+import os
+
+# Cargar las variables del archivo .env
+load_dotenv()
+
+APP_ID = os.getenv("APP_ID")
+TOKEN = os.getenv("TOKEN")
 
 console = Console()
 
