@@ -63,6 +63,7 @@ class DerivWS:
             kwargs={"ping_interval": 20, "ping_timeout": 10},
             daemon=True,
         ).start()
+        self.console.print("🔌 [yellow]Hilo WebSocket iniciado...[/yellow]")
 
     def send(self, payload):
         try:
@@ -74,8 +75,10 @@ class DerivWS:
     def on_open(self, ws):
         self.console.print("🔌 [green]Conexión WS abierta. Autenticando...[/green]")
         self.send({"authorize": self.token})
+        self.console.print("🔑 [green]Autenticación enviada...[/green]")
 
     def on_message(self, ws, message):
+        self.console.print(f"[blue]Mensaje recibido: {message[:200]}...[/blue]")
         try:
             data = json.loads(message)
         except Exception as e:
@@ -83,11 +86,13 @@ class DerivWS:
             return
 
         msg_type = data.get("msg_type")
+        self.console.print(f"[blue]Tipo de mensaje: {msg_type}[/blue]")
         if msg_type == "authorize":
             self.console.print("✅ [green]Autorizado[/green]. Obteniendo balance...")
             self.send({"balance": 1, "account": "current"})
             # suscribir OHLC 1m para cada símbolo
             for s in self.symbols:
+                self.console.print(f"📡 [cyan]Suscribiendo a {s}...[/cyan]")
                 self.send(
                     {
                         "ticks_history": s,
@@ -102,9 +107,13 @@ class DerivWS:
             bal = data.get("balance", {}).get("balance")
             if bal is not None:
                 self.engine.set_balance(float(bal))
+                self.console.print(f"💰 [green]Balance actualizado: {bal}[/green]")
         elif msg_type == "candles":
             symbol = data.get("echo_req", {}).get("ticks_history")
             candles = data.get("candles", [])
+            self.console.print(
+                f"📊 [cyan]Recibidas {len(candles)} velas para {symbol}[/cyan]"
+            )
             for c in candles:
                 ohlc = {
                     "open": float(c["open"]),
@@ -131,7 +140,8 @@ class DerivWS:
                 self.buffers.push_ohlc_1m(symbol, ohlc)
                 self._evaluate_symbol(symbol)
         elif msg_type == "error":
-            self.console.print(f"[red]WS Error: {data.get('error')}[/red]")
+            error_msg = data.get("error", {})
+            self.console.print(f"[red]WS Error: {error_msg}[/red]")
 
     def _evaluate_symbol(self, symbol):
         feats = self.features.compute_features(symbol)
@@ -223,6 +233,12 @@ class DerivWS:
 
     def on_error(self, ws, error):
         self.console.print(f"[red]WS Error: {error}[/red]")
+        self.console.print(
+            "[red]Error en la conexión WebSocket. Verifica la configuración.[/red]"
+        )
 
     def on_close(self, ws, code, msg):
-        self.console.print("[yellow]🔌 Conexión WS cerrada[/yellow]")
+        self.console.print(
+            f"[yellow]🔌 Conexión WS cerrada - Código: {code}, Mensaje: {msg}[/yellow]"
+        )
+        self.console.print("[yellow]Verifica la conexión y vuelve a intentar.[/yellow]")

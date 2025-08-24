@@ -49,7 +49,7 @@ class FeatureEngine:
                 "hist": hist,
                 "atr": atr,
                 "vol_synth": vol_synth,
-                "div_r极": div_rsi,
+                "div_rsi": div_rsi,
                 "div_macd": div_macd,
                 "sr": sr,
             }
