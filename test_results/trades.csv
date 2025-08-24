@@ -1,2 +1,0 @@
-symbol,direction,stake,entry_price,exit_price,effective_entry,effective_exit,pnl,commission,net_pnl,duration,timestamp
-R_10,CALL,100,1.0,1.1,1.0005,1.09945,9.890054972513752,0.2,9.690054972513753,2,2025-08-24T13:49:19.595128

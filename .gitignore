@@ -1,3 +1,4 @@
 .env
 .venv
 trading_bot.tar.gz
+logs/
