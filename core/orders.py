@@ -1,4 +1,5 @@
 import time
+from utils.logger import logger
 
 
 class TradeEngine:
@@ -38,7 +39,9 @@ class TradeEngine:
             return False
         return True
 
-    def open_trade(self, symbol, direction, stake, duration=2, duration_unit="m"):
+    def open_trade(
+        self, symbol, direction, stake, feature_vector, duration=2, duration_unit="m"
+    ):
         trade_id = f"T{int(time.time()*1000)}"
         self.trades[trade_id] = {
             "id": trade_id,
@@ -51,6 +54,7 @@ class TradeEngine:
             "profit": 0.0,
             "duration": duration,
             "duration_unit": duration_unit,
+            "feature_vector": feature_vector,  # Guardamos el contexto
         }
         return trade_id
 
@@ -64,3 +68,8 @@ class TradeEngine:
         self.balance += profit
         self.trades_today.append(profit)
         self.risk.on_trade_result(profit)
+
+        # Registrar datos para el entrenamiento de ML
+        if "feature_vector" in t:
+            outcome = 1 if profit > 0 else 0
+            logger.log_training_data(t["feature_vector"], outcome)

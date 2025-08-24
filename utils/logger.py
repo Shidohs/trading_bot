@@ -16,6 +16,9 @@ class SimpleLogger:
         today = datetime.now().strftime("%Y%m%d")
         self.trades_csv = self.log_dir / f"trades_{today}.csv"
 
+        # Archivo CSV para datos de entrenamiento de ML
+        self.training_data_csv = self.log_dir / "training_data.csv"
+
         # Crear header si no existe
         if not self.trades_csv.exists():
             with open(self.trades_csv, "w", newline="") as f:
@@ -32,6 +35,15 @@ class SimpleLogger:
                         "balance",
                     ]
                 )
+
+        # Crear header para el archivo de entrenamiento si no existe
+        if not self.training_data_csv.exists():
+            with open(self.training_data_csv, "w", newline="") as f:
+                writer = csv.writer(f)
+                # El header debe coincidir con el número de features + 1 (para el outcome)
+                num_features = 10
+                header = [f"feature_{i}" for i in range(num_features)] + ["outcome"]
+                writer.writerow(header)
 
         # Archivo de debug
         self.debug_file = self.log_dir / f"debug_{today}.log"
@@ -73,6 +85,16 @@ class SimpleLogger:
                 self.stats["total_profit"] += score_or_profit
 
         self.debug(f"TRADE {action}: {symbol} {direction} ${amount}")
+
+    def log_training_data(self, feature_vector, outcome):
+        """Registra datos para el entrenamiento del modelo de ML."""
+        try:
+            row = list(feature_vector) + [outcome]
+            with open(self.training_data_csv, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(row)
+        except Exception as e:
+            self.debug(f"ERROR al guardar datos de entrenamiento: {e}")
 
     def debug(self, message):
         """Log de debug"""

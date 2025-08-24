@@ -8,6 +8,7 @@ from collections import defaultdict
 from queue import Queue
 from rich.console import Console
 from utils.logger import exportar_log, log_debug, log_websocket
+from config import WS_PING_INTERVAL, WS_PING_TIMEOUT, WS_RECONNECT_DELAY
 
 console = Console()
 
@@ -76,7 +77,7 @@ class DerivWS:
         # Iniciar WebSocket en hilo separado
         ws_thread = threading.Thread(
             target=self.ws.run_forever,
-            kwargs={"ping_interval": 30, "ping_timeout": 10},
+            kwargs={"ping_interval": WS_PING_INTERVAL, "ping_timeout": WS_PING_TIMEOUT},
             daemon=True,
         )
         ws_thread.start()
@@ -92,7 +93,10 @@ class DerivWS:
         monitor_thread.start()
 
     def _activity_monitor(self):
-        """Monitor que reporta el estado cada minuto"""
+        """Monitor que reporta el estado cada minuto y verifica la conexión"""
+        last_message_count = self.message_count
+        inactivity_counter = 0
+
         while True:
             time.sleep(60)  # Cada minuto
 
@@ -104,11 +108,39 @@ class DerivWS:
 
             self.debug_print(status_report, "INFO")
 
-            # Si no hay actividad, intentar reconectar
-            if self.message_count < 5 and time.time() > 300:  # Después de 5 minutos
+            # Verificar actividad de mensajes
+            if self.message_count == last_message_count:
+                inactivity_counter += 1
                 self.debug_print(
-                    "⚠️  Poca actividad detectada, verificando conexión...", "WARNING"
+                    f"⚠️  Sin actividad de mensajes por {inactivity_counter} minutos",
+                    "WARNING",
                 )
+
+                # Si no hay actividad por 3 minutos, verificar conexión
+                if inactivity_counter >= 3:
+                    self.debug_print(
+                        "🔄 Inactividad prolongada, verificando conexión...", "WARNING"
+                    )
+                    if not self.connected or not (
+                        self.ws and self.ws.sock and self.ws.sock.connected
+                    ):
+                        self.debug_print(
+                            "❌ Conexión perdida, intentando reconectar...", "ERROR"
+                        )
+                        self._reconnect()
+                        inactivity_counter = 0
+            else:
+                inactivity_counter = 0
+                last_message_count = self.message_count
+
+            # Verificar si el WebSocket sigue conectado
+            if self.ws and hasattr(self.ws, "sock") and self.ws.sock:
+                try:
+                    # Intentar enviar un ping para verificar la conexión
+                    self.ws.sock.ping()
+                except Exception as e:
+                    self.debug_print(f"❌ Error verificando conexión: {e}", "ERROR")
+                    self._reconnect()
 
     def send(self, payload):
         """Envío con logging"""
@@ -401,11 +433,17 @@ class DerivWS:
         self.evaluations += 1
         log_websocket("EVALUATION", f"Evaluando {symbol} (#{self.evaluations})")
 
-        # Verificar datos suficientes
-        m1_count = len(self.buffers.m1[symbol]) if symbol in self.buffers.m1 else 0
-        if m1_count < 35:
-            if self.evaluations % 50 == 0:  # Log cada 50 evaluaciones
-                self.debug_print(f"⚠️  {symbol}: Solo {m1_count} velas M1", "WARNING")
+        # Verificar datos suficientes para todas las temporalidades
+        m1_ok = len(self.buffers.m1.get(symbol, [])) >= 35
+        m5_ok = len(self.buffers.m5.get(symbol, [])) >= 35
+        m15_ok = len(self.buffers.m15.get(symbol, [])) >= 35
+
+        if not all([m1_ok, m5_ok, m15_ok]):
+            if self.evaluations % 50 == 0:  # Loguear solo de vez en cuando
+                self.debug_print(
+                    f"⚠️  {symbol}: Esperando datos suficientes (M1:{m1_ok}, M5:{m5_ok}, M15:{m15_ok})",
+                    "WARNING",
+                )
             return
 
         try:
@@ -415,8 +453,14 @@ class DerivWS:
                 self.debug_print(f"❌ {symbol}: Error calculando features", "ERROR")
                 return
 
-            # Obtener score
-            score, direction, signals = self.strategy.score(feats)
+            # Obtener score y duración dinámica
+            (
+                score,
+                direction,
+                duration,
+                signals,
+                feature_vector,
+            ) = self.strategy.score(feats)
             prob = score * 100
 
             # Actualizar variables globales
@@ -447,7 +491,9 @@ class DerivWS:
             # Abrir trade si cumple condiciones
             if score >= self.strategy.threshold and can_open and can_trade:
                 stake = self.risk.compute_stake(self.engine.balance)
-                trade_id = self.engine.open_trade(symbol, direction, stake, duration=2)
+                trade_id = self.engine.open_trade(
+                    symbol, direction, stake, feature_vector, duration=duration
+                )
 
                 self.trades_opened += 1
 
@@ -504,9 +550,43 @@ class DerivWS:
             f"📦 TRADE CERRADO: {trade_id} {result} {profit:+.2f}", "SUCCESS"
         )
 
+    def _reconnect(self):
+        """Intenta reconectar el WebSocket"""
+        self.debug_print("🔄 Iniciando proceso de reconexión...", "WARNING")
+        try:
+            # Cerrar conexión existente si está abierta
+            if self.ws and self.ws.sock:
+                self.ws.close()
+
+            # Esperar un momento antes de reconectar
+            time.sleep(2)
+
+            # Reconectar
+            self.connect()
+            self.debug_print("✅ Reconexión iniciada", "SUCCESS")
+        except Exception as e:
+            self.debug_print(f"❌ Error en reconexión: {e}", "ERROR")
+            # Reintentar después de un delay
+            threading.Timer(WS_RECONNECT_DELAY, self._reconnect).start()
+
     def on_error(self, ws, error):
         self.debug_print(f"❌ Error WebSocket: {error}", "ERROR")
+        # Intentar reconexión en caso de error
+        if "timed out" in str(error) or "ping" in str(error).lower():
+            self.debug_print(
+                "🔄 Error de timeout detectado, intentando reconectar...", "WARNING"
+            )
+            threading.Timer(WS_RECONNECT_DELAY, self._reconnect).start()
 
     def on_close(self, ws, code, msg):
         self.debug_print(f"🔌 Conexión cerrada: {code} - {msg}", "WARNING")
         connection_status["connected"] = False
+        self.connected = False
+
+        # Intentar reconexión automática si no es un cierre intencional
+        if code != 1000:  # 1000 es cierre normal
+            self.debug_print(
+                f"🔄 Intentando reconectar en {WS_RECONNECT_DELAY} segundos...",
+                "WARNING",
+            )
+            threading.Timer(WS_RECONNECT_DELAY, self._reconnect).start()

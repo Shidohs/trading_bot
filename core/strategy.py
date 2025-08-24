@@ -1,18 +1,19 @@
 from utils.indicators import sma
+from core.ml_adapter import MLAdvisor
+import numpy as np
 
 
 class Strategy:
     def __init__(self):
         # pesos configurables
         self.weights = {
-            "rsi": 0.30,
-            "macd": 0.25,
-            "atr": 0.15,
-            "mtf": 0.20,
-            "div": 0.07,
-            "sr": 0.03,
+            "rules": 0.4,  # Peso para el score basado en reglas
+            "ml": 0.6,  # Peso para el score del ML
         }
-        self.threshold = 0.78  # 78%
+        self.threshold = 0.75  # 75%
+        self.ml_advisor = MLAdvisor()
+        # Aquí podrías cargar un modelo pre-entrenado si lo tuvieras
+        # self.ml_advisor.load_model('path/to/your/model.joblib')
 
     @staticmethod
     def trend_agreement(fm1, fm5, fm15):
@@ -96,17 +97,60 @@ class Strategy:
                 signals.append("SRok")
         sr_score = max(0.0, 1.0 - sr_penalty)
 
-        # scoring ponderado
-        w = self.weights
-        raw = (
-            w["rsi"] * rsi_score
-            + w["macd"] * macd_score
-            + w["atr"] * atr_score
-            + w["mtf"] * mtf_score
-            + w["div"] * div_score
-            + w["sr"] * sr_score
+        # --- Integración de Machine Learning ---
+
+        # 1. Crear vector de características para el modelo
+        feature_vector = np.array(
+            [
+                rsi_val,
+                hist,
+                atr_now,
+                mtf_bias,
+                1 if div_ok else 0,
+                1 - sr_penalty,
+                # Añadir más features si el modelo fue entrenado con ellas
+                fm5["rsi"][-1],
+                fm5["hist"][-1],
+                fm15["rsi"][-1],
+                fm15["hist"][-1],
+            ]
         )
+
+        # 2. Obtener consejo del ML Advisor
+        # Como no tenemos un modelo entrenado, nos dará 0.5 (neutral)
+        # Si cargaras un modelo, aquí usaría ese conocimiento.
+        ml_score = self.ml_advisor.advise(feature_vector)
+        signals.append(f"ML={ml_score:.2f}")
+
+        # 3. Scoring ponderado (Reglas + ML)
+        # El score de reglas se normaliza para que esté entre 0 y 1
+        rules_score = (
+            0.30 * rsi_score
+            + 0.25 * macd_score
+            + 0.15 * atr_score
+            + 0.20 * mtf_score
+            + 0.07 * div_score
+            + 0.03 * sr_score
+        )
+
+        final_score = (
+            self.weights["rules"] * rules_score + self.weights["ml"] * ml_score
+        )
+
+        # --- Lógica de Duración Dinámica ---
+        duration = 2  # Duración por defecto en minutos
+
+        # Condición 1: Señal muy fuerte y alta volatilidad -> Operación corta
+        if final_score > 0.85 and atr_score > 0:
+            duration = 1
+            signals.append("D=1m")
+        # Condición 2: Tendencia clara y estable -> Operación más larga
+        elif mtf_score > 0 and 0.75 < final_score <= 0.85:
+            duration = 3
+            signals.append("D=3m")
+        else:
+            signals.append("D=2m")
 
         # dirección sugerida por sesgo MTF y MACD
         direction = "CALL" if mtf_bias >= 0 and hist >= 0 else "PUT"
-        return float(raw), direction, signals
+        return float(final_score), direction, duration, signals, feature_vector

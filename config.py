@@ -19,8 +19,8 @@ CORRELATION_THRESHOLD = 0.8  # Umbral de correlación
 
 # Configuración de WebSocket
 WS_RECONNECT_DELAY = 30  # Segundos entre reconexiones
-WS_PING_INTERVAL = 20  # Segundos entre pings
-WS_PING_TIMEOUT = 10  # Timeout de ping
+WS_PING_INTERVAL = 30  # Aumentar a 30 segundos entre pings
+WS_PING_TIMEOUT = 20  # Aumentar a 20 segundos para el timeout de ping
 
 # Configuración de backtesting
 BACKTEST_COMMISSION = 0.001  # 0.1% comisión

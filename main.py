@@ -36,9 +36,19 @@ deriv_client = None
 
 def signal_handler(signum, frame):
     """Manejo de Ctrl+C"""
-    global running
+    global running, deriv_client
     console.print("\n🛑 [yellow]Cerrando bot...[/yellow]")
     running = False
+
+    # Entrenar y guardar el modelo de ML al salir
+    if deriv_client and deriv_client.strategy.ml_advisor.ml_available:
+        console.print(
+            "\n🧠 [cyan]Entrenando modelo de ML con los datos de la sesión...[/cyan]"
+        )
+        try:
+            deriv_client.strategy.ml_advisor.train_from_csv()
+        except Exception as e:
+            console.print(f"❌ [red]Error durante el entrenamiento: {e}[/red]")
 
     # Mostrar estadísticas finales
     if logger:
@@ -197,6 +207,11 @@ def start_all():
     risk = RiskManager()
     engine = TradeEngine(risk)
     strategy = Strategy()
+
+    # Cargar modelo de ML existente al inicio
+    if strategy.ml_advisor.ml_available:
+        console.print("\n🧠 [cyan]Cargando modelo de ML existente...[/cyan]")
+        strategy.ml_advisor.load_model()
 
     # Crear cliente WebSocket
     deriv_client = DerivWS(
